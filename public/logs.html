@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Logs | NetworkMonitor</title>
+  <link rel="stylesheet" href="css/logs.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">NetworkMonitor v3.1</div>
+    <nav aria-label="Main">
+      <a href="index.html">Dashboard</a>
+      <a href="lanmap.html">LAN Map</a>
+      <a href="logs.html" aria-current="page">Logs</a>
+    </nav>
+     <div class="sidebar-bottom">
+        <a href="account.html" class="account-link">
+            <span class="side-icon">♙</span>
+            Account
+        </a>
+        <button type="button" class="logout-btn" id="logoutBtn">
+            <span class="side-icon">↪</span>
+            Logout
+        </button>
+    </div>
+  </aside>
+
+  <main class="logs-page">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">NetSentry: Network Monitoring Dashboard</p>
+        <h1>Alerts &amp; History</h1>
+        <button id="refreshLogs" type="button">
+            ↻ Refresh Logs
+        </button>
+      </div>
+    </header>
+
+    <section class="logs-grid">
+
+      <!-- Left Panel -->
+      <article class="log-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Real-Time Event Log</h2>
+            <p>Active Alerts (<span id="activeAlertCount">0</span>)</p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <input type="text" id="eventSearch" placeholder="Search events, devices...">
+          <select id="severityFilter">
+            <option value="all">Filter by Severity</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="info">Info</option>
+          </select>
+          <select id="eventTimeFilter">
+            <option value="24h">Timestamp: Last 24 Hrs</option>
+            <option value="12h">Last 12 Hrs</option>
+            <option value="7d">Last 7 Days</option>
+          </select>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Severity</th>
+                <th>Device</th>
+                <th>Event Message</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody id="eventLogBody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <!-- Right Panel -->
+      <article class="log-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Historical MySQL Logs</h2>
+            <p>Historical log data (Last 7 days)</p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <input type="date" id="fromDate">
+          <input type="date" id="toDate">
+          <select id="logTypeFilter">
+              <option value="all">Event Type</option>
+              <option value="query">Query Slowdown</option>
+              <option value="port">Port Failure</option>
+              <option value="restart">Service Restart</option>
+          </select>
+          <input type="text" id="historySearch" placeholder="Search log...">
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Severity</th>
+                <th>Source</th>
+                <th>Action</th>
+                <th>User</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody id="historyLogBody"></tbody>
+          </table>
+        </div>
+      </article>
+
+    </section>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/logs.js"></script>
+</body>
+</html>

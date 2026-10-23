@@ -1,0 +1,26 @@
+{
+  "name": "public",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.3.0",
+    "mysql2": "^3.24.6",
+    "socket.io": "^4.8.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/knrcreddy25/Network-Monitoring.git"
+  },
+  "bugs": {
+    "url": "https://github.com/knrcreddy25/Network-Monitoring/issues"
+  },
+  "homepage": "https://github.com/knrcreddy25/Network-Monitoring#readme",
+  "description": ""
+}

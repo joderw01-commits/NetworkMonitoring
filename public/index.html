@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard | NetworkMonitor</title>
+  <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">NetworkMonitor v3.1</div>
+    <nav aria-label="Main">
+      <a href="index.html" aria-current="page">Dashboard</a>
+      <a href="lanmap.html" >LAN Map</a>
+      <a href="logs.html">Logs</a>
+    </nav>
+     <div class="sidebar-bottom">
+
+        <a href="account.html" class="account-link">
+            <span class="side-icon">♙</span>
+            Account
+        </a>
+
+        <button type="button" class="logout-btn" id="logoutBtn">
+            <span class="side-icon">↪</span>
+            Logout
+        </button>
+
+    </div>
+
+  </aside>
+
+  
+<main class="dashboard">
+    <header class="page-header">
+        <div>
+            <h1>Network Overview</h1>
+            <p>Live network health and monitoring summary</p>
+        </div>
+        <a href="lanmap.html">View LAN Map →</a>
+    </header>
+
+    <section class="stats-grid">
+
+      <article class="summary-card">
+          <div class="summary-top">
+              <span class="summary-icon health">❤</span>
+              <h3>Network Health</h3>
+          </div>
+          <div class="summary-main">
+              <strong id="healthPercent">0%</strong>
+              <span id="healthNote">Stable</span>
+          </div>
+      </article>
+
+      <article class="summary-card">
+          <div class="summary-top">
+              <span class="summary-icon traffic">⇅</span>
+              <h3>Total Traffic</h3>
+          </div>
+          <div class="summary-main">
+              <strong><span id="totalTraffic">0</span> Mbps</strong>
+              <span id="trafficChange">↑ 0 ↓ 0</span>
+          </div>
+      </article>
+
+      <article class="summary-card">
+          <div class="summary-top">
+              <span class="summary-icon alerts">⚠</span>
+              <h3>Active Alerts</h3>
+          </div>
+          <div class="summary-main">
+              <strong id="criticalAlerts">0 Critical</strong>
+              <span id="warningAlerts">0 Warnings</span>
+          </div>
+      </article>
+
+      <article class="summary-card">
+          <div class="summary-top">
+              <span class="summary-icon devices">🖥</span>
+              <h3>Monitored Devices</h3>
+          </div>
+          <div class="summary-main">
+              <strong id="monitoredTotal">0</strong>
+              <span>
+                  <span id="monitoredUp">0</span> Up &nbsp; 
+                  <span id="monitoredDown">0</span> Down
+              </span>
+          </div>
+      </article>
+
+    </section>
+
+    <section class="dashboard-grid">
+        <article class="panel">
+            <h2>Network Availability</h2>
+            <canvas id="availabilityChart"></canvas>
+        </article>
+
+        <article class="panel">
+            <h2>Device Distribution</h2>
+            <canvas id="deviceChart"></canvas>
+        </article>
+
+        <article class="panel">
+            <h2>Recent Activity</h2>
+
+            <div id="recentActivity"></div>
+
+            <a href="logs.html" class="view-logs">
+                Full history in Logs <span>→</span>
+            </a>
+        </article>
+
+        <article class="panel">
+            <h2>Devices Requiring Attention</h2>
+            <div id="problemDevices"></div>
+        </article>
+    </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="js/dashboard.js"></script>
+</body>
+</html>

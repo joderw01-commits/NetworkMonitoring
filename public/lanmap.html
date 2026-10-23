@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAN Map | NetworkMonitor</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">NetworkMonitor v3.1</div>
+    <nav aria-label="Main">
+      <a href="index.html">Dashboard</a>
+      <a href="lanmap.html" aria-current="page">LAN Map</a>
+      <a href="logs.html">Logs</a>
+    </nav>
+    <div class="sidebar-bottom">
+        <a href="account.html" class="account-link">
+            <span class="side-icon">♙</span>
+            Account
+        </a>
+        <button type="button" class="logout-btn" id="logoutBtn">
+            <span class="side-icon">↪</span>
+            Logout
+        </button>
+    </div>
+
+  </aside>
+
+  <main>
+    <header class="page-head">
+      <div>
+        <h1>Device Discovery & LAN Map</h1>
+        <p class="sub" id="count">Loading devices…</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="scan-btn" type="button">Scan Network</button>
+        <button class="btn" id="refresh-btn" type="button">Refresh Map</button>
+      </div>
+    </header>
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <section class="panel" aria-labelledby="map-title">
+      <h2 id="map-title">LAN Map</h2>
+      <div class="map-scroll"><svg id="map" viewBox="0 0 900 290" role="img" aria-label="Network topology map"></svg></div>
+    </section>
+
+    <section class="panel" aria-labelledby="list-title">
+      <div class="panel-head">
+        <h2 id="list-title">Active Devices</h2>
+        <input class="input" id="filter" type="search" placeholder="Filter by name, IP, type…" aria-label="Filter devices">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Device Name</th><th>IP Address</th><th>MAC Address</th><th>Type</th><th>OS</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/lanmap.js"></script>
+</body>
+</html>
