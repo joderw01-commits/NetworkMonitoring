@@ -1,7 +1,8 @@
-
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const dns = require('dns').promises;
 const { execFile } = require('child_process');
 
 const { Server } = require('socket.io');
@@ -9,6 +10,9 @@ const { Server } = require('socket.io');
 const PORT = process.env.PORT || 3000;
 const INTERVAL = (+process.env.POLL_SECONDS || 30) * 1000;
 const SIMULATE = process.env.SIMULATE === '1';
+// Auto-discovery of every device on the LAN (disable with DISCOVER=0).
+// Override the scanned range with D ISCOVER_SUBNET=192.168.1.0/24,10.0.0.0/24
+const DISCOVER = !SIMULATE && process.env.DISCOVER !== '0';
 const WARN_MS = +process.env.WARN_LATENCY_MS || 150;
 const DATA_DIR = path.join(__dirname, 'data');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
@@ -42,7 +46,7 @@ function readJson(f, fallback) {
 
 function load() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  devices = readJson(DEVICES_FILE, null) || SEED;
+  devices = readJson(DEVICES_FILE, null) || (DISCOVER ? [] : SEED);
   state = readJson(STATE_FILE, state);
   saveNow();
 }
@@ -99,7 +103,7 @@ function resolveEvents(d) {
 }
 
 // ---------- monitoring ----------
-function ping(ip) {
+function ping(ip, fast = false) {
   return new Promise((resolve) => {
     if (SIMULATE) {
       const r = Math.random();
@@ -117,13 +121,17 @@ function ping(ip) {
     }
 
     const args = process.platform === 'win32'
-      ? ['-n', '1', '-w', '2000', ip]
-      : ['-c', '1', '-W', '2', ip];
+      ? ['-n', '1', '-w', fast ? '800' : '2000', ip]
+      : ['-c', '1', '-W', fast ? '1' : '2', ip];
 
     const t0 = Date.now();
 
     execFile('ping', args, { timeout: 5000 }, (err, out) => {
       if (err) return resolve({ up: false });
+      // Windows can exit 0 on "Destination host unreachable"; a real reply has TTL=
+      if (process.platform === 'win32' && !/TTL=/i.test(out || '')) {
+        return resolve({ up: false });
+      }
 
       const m = /time[=<]\s*([\d.]+)/i.exec(out || '');
       resolve({
@@ -134,8 +142,8 @@ function ping(ip) {
   });
 }
 
-async function checkDevice(d, first = false) {
-  const res = await ping(d.ip);
+async function checkDevice(d, first = false, pre = null) {
+  const res = pre || await ping(d.ip);
   const prev = d.status;
 
   d.status = !res.up
@@ -165,10 +173,216 @@ async function checkDevice(d, first = false) {
   return d;
 }
 
+// ---------- network discovery ----------
+const ip2n = (ip) => ip.split('.').reduce((a, o) => a * 256 + +o, 0);
+const n2ip = (n) => [24, 16, 8, 0].map((s) => (n >>> s) & 255).join('.');
+
+// Skip docker / VM / VPN adapters so we scan your real LAN
+const VIRTUAL_IF = /docker|veth|br-|virbr|vmnet|vboxnet|vethernet|tailscale|utun|awdl|llw/i;
+
+function subnets() {
+  const seen = new Map();
+
+  const add = (addr, prefix, explicit) => {
+    if (!explicit && prefix < 22) prefix = 24; // keep sweeps small
+    if (prefix < 20 || prefix > 30) return;
+    const size = 2 ** (32 - prefix);
+    const a = ip2n(addr);
+    const net = a - (a % size);
+    seen.set(`${net}/${prefix}`, { net, size });
+  };
+
+  if (process.env.DISCOVER_SUBNET) {
+    for (const c of process.env.DISCOVER_SUBNET.split(',')) {
+      const [addr, p] = c.trim().split('/');
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(addr) && +p) add(addr, +p, true);
+    }
+  } else {
+    for (const [name, list] of Object.entries(os.networkInterfaces())) {
+      if (VIRTUAL_IF.test(name)) continue;
+      for (const i of list || []) {
+        if ((i.family !== 'IPv4' && i.family !== 4) || i.internal) continue;
+        if (i.address.startsWith('169.254.')) continue;
+        add(i.address, ip2n(i.netmask).toString(2).replace(/0/g, '').length, false);
+      }
+    }
+  }
+
+  return [...seen.values()];
+}
+
+async function pool(items, n, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) await fn(items[i++]);
+  }));
+}
+
+// ip -> MAC, read from the OS neighbour table (filled by the ping sweep)
+function readArp() {
+  return new Promise((resolve) => {
+    const map = new Map();
+
+    const addArp = (ip, mac) => {
+      mac = mac.split(/[:-]/).map((o) => o.padStart(2, '0')).join(':').toUpperCase();
+      if (mac === 'FF:FF:FF:FF:FF:FF' || mac === '00:00:00:00:00:00' || mac.startsWith('01:00:5E')) return;
+      map.set(ip, mac);
+    };
+
+    if (process.platform === 'linux') {
+      try {
+        fs.readFileSync('/proc/net/arp', 'utf8').split('\n').slice(1).forEach((line) => {
+          const c = line.trim().split(/\s+/);
+          if (c.length >= 4 && c[2] !== '0x0') addArp(c[0], c[3]);
+        });
+      } catch { /* ignore */ }
+      return resolve(map);
+    }
+
+    execFile('arp', ['-a'], { timeout: 5000 }, (err, out) => {
+      const re = /(\d+\.\d+\.\d+\.\d+)\)?\s+(?:at\s+)?([0-9a-f]{1,2}(?:[:-][0-9a-f]{1,2}){5})\b/gi;
+      let m;
+      while ((m = re.exec(out || ''))) addArp(m[1], m[2]);
+      resolve(map);
+    });
+  });
+}
+
+function getGateway() {
+  return new Promise((resolve) => {
+    const [cmd, args, re] =
+      process.platform === 'win32'
+        ? ['route', ['print', '-4', '0.0.0.0'], /0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)/]
+        : process.platform === 'darwin'
+          ? ['route', ['-n', 'get', 'default'], /gateway:\s*(\S+)/]
+          : ['ip', ['route', 'show', 'default'], /default via (\S+)/];
+
+    execFile(cmd, args, { timeout: 3000 }, (err, out) => {
+      const m = !err && re.exec(out || '');
+      resolve(m ? m[1] : null);
+    });
+  });
+}
+
+const rdns = (ip) => Promise.race([
+  dns.reverse(ip).then((h) => (h[0] ? h[0].split('.')[0] : null)).catch(() => null),
+  new Promise((r) => setTimeout(() => r(null), 1500))
+]);
+
+const SERVER_OUI = ['B8:27:EB', 'DC:A6:32', 'E4:5F:01', 'D8:3A:DD', '00:50:56', '08:00:27', '52:54:00', '00:15:5D'];
+
+function guessType(mac, isGw) {
+  if (isGw) return 'router';
+  if (!mac) return 'pc';
+  if (SERVER_OUI.some((p) => mac.startsWith(p))) return 'server'; // Raspberry Pi / VMs
+  if (parseInt(mac.slice(0, 2), 16) & 2) return 'phone';          // randomised "private" MAC
+  return 'pc';
+}
+
+// Ping-sweep every address in the local subnet(s), then read ARP for MACs.
+async function discover() {
+  const nets = subnets();
+  if (!nets.length) return null;
+
+  const hosts = nets.flatMap(({ net, size }) =>
+    Array.from({ length: size - 2 }, (_, i) => n2ip(net + 1 + i)));
+  const inRange = new Set(hosts);
+  const found = new Map(); // ip -> { ms, mac }
+
+  await pool(hosts, 64, async (ip) => {
+    const r = await ping(ip, true);
+    if (r.up) found.set(ip, { ms: r.ms, mac: null });
+  });
+
+  // devices that block ICMP still show up in the ARP table
+  for (const [ip, mac] of await readArp()) {
+    if (!inRange.has(ip)) continue;
+    if (!found.has(ip)) found.set(ip, { ms: null, mac });
+    else found.get(ip).mac = mac;
+  }
+
+  // our own machine isn't in its own ARP table
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const i of list || []) {
+      const f = found.get(i.address);
+      if (f && !f.mac && i.mac && i.mac !== '00:00:00:00:00:00') f.mac = i.mac.toUpperCase();
+    }
+  }
+
+  return { found, hosts: inRange, gateway: await getGateway() };
+}
+
+async function mergeDiscovery(disc) {
+  const initial = devices.length === 0;
+  const fresh = [];
+
+  const ips = [...disc.found.keys()].sort((a, b) =>
+    a === disc.gateway ? -1 : b === disc.gateway ? 1 : ip2n(a) - ip2n(b));
+
+  for (const ip of ips) {
+    const f = disc.found.get(ip);
+    const known =
+      (f.mac && devices.find((x) => x.mac && x.mac.toUpperCase() === f.mac)) ||
+      devices.find((x) => x.ip === ip && (!x.mac || !f.mac || x.mac.toUpperCase() === f.mac));
+
+    if (known) {
+      known.ip = ip; // follows DHCP address changes (matched by MAC)
+      if (f.mac && !known.mac) known.mac = f.mac;
+    } else {
+      fresh.push(ip);
+    }
+  }
+
+  const names = await Promise.all(fresh.map(rdns));
+
+  fresh.forEach((ip, n) => {
+    const f = disc.found.get(ip);
+    const isGw = ip === disc.gateway;
+    const gw = devices.find((x) => x.ip === disc.gateway);
+    const k = devices.filter((x) => x.discovered && x.ip !== disc.gateway).length;
+
+    const d = {
+      id: nextId(),
+      name: names[n] || (isGw ? 'Gateway' : `Device ${ip}`),
+      type: guessType(f.mac, isGw),
+      ip,
+      mac: f.mac || '',
+      os: '',
+      parent: isGw || !gw ? null : gw.id,
+      x: isGw ? 450 : 90 + (k % 7) * 120,
+      y: isGw ? 40 : 150 + Math.floor(k / 7) * 100,
+      status: 'online',
+      latencyMs: f.ms,
+      lastSeen: Date.now(),
+      discovered: true
+    };
+
+    devices.push(d);
+    if (!initial) {
+      addEvent('info', d, 'New device discovered',
+        `${d.name} · ${d.ip}${d.mac ? ` (${d.mac})` : ''} joined the network.`);
+    }
+  });
+
+  if (initial && fresh.length) {
+    addEvent('info', null, 'Network discovery',
+      `${fresh.length} devices discovered on the local network.`);
+  }
+}
+
 let firstRun = true;
 
-async function scanAll(announce = true) {
-  await Promise.all(devices.map((d) => checkDevice(d, firstRun)));
+async function runScan(announce = true) {
+  const disc = DISCOVER
+    ? await discover().catch((e) => { console.error('discovery failed:', e.message); return null; })
+    : null;
+
+  if (disc) await mergeDiscovery(disc);
+
+  await Promise.all(devices.map((d) => {
+    const r = disc && disc.found.get(d.ip);
+    return checkDevice(d, firstRun, r ? { up: true, ms: r.ms } : null);
+  }));
 
   firstRun = false;
 
@@ -206,6 +420,13 @@ async function scanAll(announce = true) {
   });
 
   return scannedAt;
+}
+
+// one scan at a time; overlapping callers share the in-flight scan
+let scanning = null;
+function scanAll(announce = true) {
+  if (!scanning) scanning = runScan(announce).finally(() => { scanning = null; });
+  return scanning;
 }
 
 // ---------- derived data ----------
@@ -586,9 +807,9 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(
-    `NetworkMonitor → http://localhost:${PORT}  (poll ${INTERVAL / 1000}s${SIMULATE ? ', SIMULATED' : ''})`
+    `NetworkMonitor → http://localhost:${PORT}  (poll ${INTERVAL / 1000}s${SIMULATE ? ', SIMULATED' : ''}${DISCOVER ? ', auto-discovery' : ''})`
   );
 
-  scanAll(false);
-  setInterval(() => scanAll(false), INTERVAL);
+  scanAll(false).catch(console.error);
+  setInterval(() => scanAll(false).catch(console.error), INTERVAL);
 });
